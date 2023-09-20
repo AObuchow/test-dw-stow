@@ -1,0 +1,104 @@
+schemaVersion: 2.2.0
+metadata:
+  name: udi-tooling-test-new
+  displayName: UDI tooling test NEW
+  description: UDI tooling test NEW
+  icon: https://raw.githubusercontent.com/devfile-samples/devfile-stack-icons/main/spring.svg
+  tags:
+    - Java
+    - Spring
+  projectType: springboot
+  language: Java
+  version: 2.0.0
+  globalMemoryLimit: 2674Mi
+parent:
+  uri: https://raw.githubusercontent.com/AObuchow/udi-tooling/master/parent-devfile.yaml
+projects:
+  - name: udi-tooling
+    git:
+      remotes:
+        origin: "https://github.com/AObuchow/udi-tooling.git"
+components:
+  - name: tools
+    container:
+      image: quay.io/aobuchow/universal-developer-image:stow
+      args: ['tail', '-f', '/dev/null']
+      memoryLimit: 768Mi
+      mountSources: true
+      endpoints:
+        - name: http-springboot
+          targetPort: 8080
+        - exposure: none
+          name: debug
+          targetPort: 5858
+      env:
+        - name: DEBUG_PORT
+          value: "5858"
+  - name: build
+    image:
+      imageName: java-springboot-image:latest
+      dockerfile:
+        uri: docker/Dockerfile
+        buildContext: .
+        rootRequired: false
+  - name: deploy
+    kubernetes:
+      uri: kubernetes/deploy.yaml
+      endpoints:
+        - name: http-8081
+          targetPort: 8081
+
+commands:
+  - id: update-home
+    exec:
+      component: tools
+      commandLine: stow . -t /home/user/ -d /home/tooling/ && source /home/user/.bashrc
+      workingDir: /home/tooling/
+  - id: test-binaries
+    exec:
+      component: tools
+      commandLine: sdk > /projects/udi-tooling/sdk_out.txt ; jbang --help > /projects/udi-tooling/jbang_out.txt ; gopls --help > /projects/udi-tooling/gopls_out.txt ; kubectl krew > /projects/udi-tooling/krew_out.txt
+      workingDir: ${PROJECT_SOURCE}
+  - id: log-binaries
+    exec:
+      component: tools
+      commandLine: compgen -c | xargs which --all --skip-functions | sort | uniq > /projects/udi-tooling/binaries.txt ;  git add /projects/udi-tooling/binaries.txt ; git commit -m "update binaries.txt" ; git push 
+      workingDir: ${PROJECT_SOURCE}
+  - id: build
+    exec:
+      component: tools
+      workingDir: ${PROJECT_SOURCE}
+      commandLine: 'mvn clean -Dmaven.repo.local=/home/user/.m2/repository package -Dmaven.test.skip=true'
+      group:
+        kind: build
+        isDefault: true
+  - id: run
+    exec:
+      component: tools
+      workingDir: ${PROJECT_SOURCE}
+      commandLine: 'mvn -Dmaven.repo.local=/home/user/.m2/repository spring-boot:run'
+      group:
+        kind: run
+        isDefault: true
+  - id: debug
+    exec:
+      component: tools
+      workingDir: ${PROJECT_SOURCE}
+      commandLine: 'java -Xdebug -Xrunjdwp:server=y,transport=dt_socket,address=${DEBUG_PORT},suspend=n -jar target/*.jar'
+      group:
+        kind: debug
+        isDefault: true
+  - id: build-image
+    apply:
+      component: build
+  - id: deployk8s
+    apply:
+      component: deploy
+  - id: deploy
+    composite:
+      commands:
+        - build-image
+        - deployk8s
+      group:
+        kind: deploy
+        isDefault: true
